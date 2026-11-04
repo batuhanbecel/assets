@@ -34,7 +34,8 @@ namespace TaskbarStatus
         // Embedding into the taskbar (see SetEmbedded).
         IntPtr embeddedIn;
         DateTime nextEmbedTry;
-        bool closing;
+        bool closing, clickThrough;
+        static readonly uint OwnPid = (uint)Process.GetCurrentProcess().Id;
         Form menuOwner;
         public static bool RestartRequested;
         int updateBusy;
@@ -204,6 +205,12 @@ namespace TaskbarStatus
 
             // The taskbar hides itself behind fullscreen apps, and its children with it.
             SetEmbedded(tray, !fullscreen);
+            // While a fullscreen app or a game that is drawing frames is in front, stray clicks at
+            // the screen edge must reach the game, not open our menu: let them through.
+            uint fgPid;
+            GetWindowThreadProcessId(fg, out fgPid);
+            bool gameInFront = fullscreen || (fps.Available && fpsValue > 0 && fgPid != OwnPid);
+            SetClickThrough(gameInFront);
             Render(tray, fullscreen);
             if (!menu.Visible && ClientRectangle.Contains(PointToClient(Cursor.Position))) tip.SetToolTip(this, Details());
             if (settings.CheckUpdates && !Program.Dev && !Program.Diagnose && DateTime.UtcNow >= nextUpdateCheck) ScheduleUpdateCheck(false);
@@ -592,11 +599,26 @@ namespace TaskbarStatus
             string c = cls.ToString();
             if (c == "WorkerW" || c == "Progman") return false;
 
+            // Visible bounds: GetWindowRect includes invisible resize borders on normal windows.
             RECT r;
-            if (!GetWindowRect(fg, out r)) return false;
-            System.Drawing.Rectangle screen = Screen.FromHandle(fg).Bounds;
-            if (Screen.FromHandle(tray).Bounds != screen) return false;
-            return r.Left <= screen.Left && r.Top <= screen.Top && r.Right >= screen.Right && r.Bottom >= screen.Bottom;
+            if (DwmGetWindowAttribute(fg, DWMWA_EXTENDED_FRAME_BOUNDS, out r, Marshal.SizeOf(typeof(RECT))) != 0 &&
+                !GetWindowRect(fg, out r)) return false;
+            RECT tb;
+            if (!GetWindowRect(tray, out tb)) return false;
+            System.Drawing.Rectangle screen = Screen.FromHandle(tray).Bounds;
+            return OverlayLayout.IsFullscreen(
+                System.Drawing.Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom), screen,
+                System.Drawing.Rectangle.FromLTRB(tb.Left, tb.Top, tb.Right, tb.Bottom), 4);
+        }
+
+        // Over a game the floating widget must never take clicks (it would open its menu and
+        // pull focus out of the game); WS_EX_TRANSPARENT passes them to the window below.
+        void SetClickThrough(bool on)
+        {
+            if (on == clickThrough) return;
+            int ex = GetWindowLong(Handle, GWL_EXSTYLE);
+            SetWindowLong(Handle, GWL_EXSTYLE, on ? ex | WS_EX_TRANSPARENT : ex & ~WS_EX_TRANSPARENT);
+            clickThrough = on;
         }
 
         static bool IsScreenCapture(IntPtr window)
@@ -930,7 +952,9 @@ namespace TaskbarStatus
         const uint SWP_NOSIZE = 1, SWP_NOMOVE = 2, SWP_NOACTIVATE = 0x10,
                    SWP_FRAMECHANGED = 0x20, SWP_SHOWWINDOW = 0x40, CLEARTYPE_NATURAL_QUALITY = 6;
         static readonly IntPtr HWND_TOPMOST = new IntPtr(-1), HWND_TOP = IntPtr.Zero;
-        const int GWL_STYLE = -16, WS_CHILD = 0x40000000;
+        const int GWL_STYLE = -16, GWL_EXSTYLE = -20, WS_CHILD = 0x40000000, WS_EX_TRANSPARENT = 0x20;
+        const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+        [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
         const int WS_POPUP = unchecked((int)0x80000000);
 
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }

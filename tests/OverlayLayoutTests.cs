@@ -29,6 +29,22 @@ static class OverlayLayoutTests
             new Rectangle(-600, -2, 500, 48), new Rectangle(-600, -48, 500, 48));
         Check("Large drag offset", screen, new Rectangle(-4000, 1032, 500, 48), new Rectangle(0, 1032, 500, 48));
         Check("Overlay wider than screen", screen, new Rectangle(-500, 1032, 2400, 48), new Rectangle(0, 1032, 1920, 48));
+
+        var bar = new Rectangle(0, 1032, 1920, 48);
+        FullscreenCheck("Exact fullscreen", screen, screen, bar, true);
+        FullscreenCheck("Borderless a pixel short", new Rectangle(0, 1, 1920, 1078), screen, bar, true);
+        FullscreenCheck("Borderless window over the taskbar strip", new Rectangle(0, 20, 1920, 1060), screen, bar, true);
+        FullscreenCheck("Maximized window stops at work area", new Rectangle(0, 0, 1920, 1032), screen, bar, false);
+        FullscreenCheck("Normal window", new Rectangle(200, 150, 1280, 720), screen, bar, false);
+        FullscreenCheck("Window on another monitor", new Rectangle(1920, 0, 1920, 1080), screen, bar, false);
+        FullscreenCheck("Hidden taskbar slid off screen", screen, screen, new Rectangle(0, 1078, 1920, 48), true);
+        FullscreenCheck("Half-width window over taskbar", new Rectangle(0, 500, 960, 580), screen, bar, false);
+    }
+
+    static void FullscreenCheck(string name, Rectangle window, Rectangle monitor, Rectangle taskbar, bool expected)
+    {
+        if (OverlayLayout.IsFullscreen(window, monitor, taskbar, 4) != expected) throw new Exception(name);
+        Console.WriteLine("PASS " + name);
     }
 
     static void CaptureCheck(string name, string process, Rectangle window, Rectangle screen, bool expected)
